@@ -644,9 +644,14 @@ stock AC_StageShowV2Info(playerid)
 
     if (AC_TestStrikeV2Count[playerid] > 0)
     {
+        new linked_text[4];
+        if (AC_TestLastStrikeLinked[playerid])
+            format(linked_text, sizeof(linked_text), "yes");
+        else
+            format(linked_text, sizeof(linked_text), "no");
+
         format(message, sizeof(message), "[AC-TEST] Last strike sequence: %d | linked to latest evidence: %s",
-            AC_TestLastStrikeSequence[playerid],
-            AC_TestLastStrikeLinked[playerid] ? ("yes") : ("no"));
+            AC_TestLastStrikeSequence[playerid], linked_text);
         SendClientMessage(playerid, 0xD8D8D8FF, message);
     }
     return 1;
