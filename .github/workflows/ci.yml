@@ -1,0 +1,131 @@
+name: Validate anti-cheat test gamemode
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AC_ANTICHEAT_COMMIT: b8e7885395f35f60f64dac1db8f6428730e2674d
+  OMP_STDLIB_COMMIT: 17c1b0191195cb0b59a820135fbca622c84129dd
+
+jobs:
+  static-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run gamemode contract tests
+        run: python3 -m unittest discover -s tests -v
+
+  pawn-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned anti-cheat dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/anticheat"
+          git -C "$RUNNER_TEMP/anticheat" remote add origin https://github.com/yyouki/anticheat.git
+          git -C "$RUNNER_TEMP/anticheat" fetch --depth=1 origin "$AC_ANTICHEAT_COMMIT"
+          git -C "$RUNNER_TEMP/anticheat" checkout --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/anticheat" rev-parse HEAD)" = "$AC_ANTICHEAT_COMMIT"
+      - name: Checkout pinned open.mp standard includes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/omp-stdlib"
+          git -C "$RUNNER_TEMP/omp-stdlib" remote add origin https://github.com/openmultiplayer/omp-stdlib.git
+          git -C "$RUNNER_TEMP/omp-stdlib" fetch --depth=1 origin "$OMP_STDLIB_COMMIT"
+          git -C "$RUNNER_TEMP/omp-stdlib" checkout --detach FETCH_HEAD
+      - name: Install pinned Pawn compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/pawnc-3.10.11-linux.tar.gz"
+          curl --fail --silent --show-error --location \
+            "https://github.com/openmultiplayer/compiler/releases/download/v3.10.11/pawnc-3.10.11-linux.tar.gz" \
+            --output "$archive"
+          echo "13977433acb1dfb23e3ec6354f622115d5073e97aced9395058a9db59d2564c2  $archive" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/pawnc"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/pawnc"
+          compiler="$(find "$RUNNER_TEMP/pawnc" -type f -name pawncc -print -quit)"
+          library="$(find "$RUNNER_TEMP/pawnc" -type f -name libpawnc.so -print -quit)"
+          test -n "$compiler"
+          test -n "$library"
+          chmod +x "$compiler"
+          echo "PAWNCC=$compiler" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$(dirname "$library"):${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+      - name: Compile test gamemode
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/gamemodetests-build"
+          "$PAWNCC" -i"$RUNNER_TEMP/anticheat/include" -i"$RUNNER_TEMP/omp-stdlib" -O2 -Z- \
+            "-o$RUNNER_TEMP/gamemodetests-build/ac-test.amx" gamemode/ac_test.pwn
+          test -s "$RUNNER_TEMP/gamemodetests-build/ac-test.amx"
+      - name: Assemble runnable package
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="$RUNNER_TEMP/gamemodetests-package"
+          mkdir -p "$package/gamemodes" "$package/docs"
+          cp "$RUNNER_TEMP/gamemodetests-build/ac-test.amx" "$package/gamemodes/ac-test.amx"
+          cp config.json "$package/config.json"
+          cp README.md "$package/README.md"
+          cp docs/TEST_MATRIX.md "$package/docs/TEST_MATRIX.md"
+      - name: Upload runnable package
+        uses: actions/upload-artifact@v4
+        with:
+          name: gamemodetests-package
+          path: ${{ runner.temp }}/gamemodetests-package/
+          if-no-files-found: error
+          retention-days: 30
+
+  openmp-runtime-smoke:
+    needs: pawn-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download compiled test package
+        uses: actions/download-artifact@v4
+        with:
+          name: gamemodetests-package
+          path: ${{ runner.temp }}/gamemodetests-package
+      - name: Install 32-bit open.mp runtime libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libc6:i386 libatomic1:i386 libgcc-s1:i386 libstdc++6:i386
+      - name: Download pinned open.mp Linux server
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/open.mp-linux-x86.tar.gz"
+          curl --fail --silent --show-error --location \
+            "https://github.com/openmultiplayer/open.mp/releases/download/v1.6.7.3218/open.mp-linux-x86.tar.gz" \
+            --output "$archive"
+          echo "0f7bfe70bb68ea780fe24a910b69412046e53d10feb65a9d4a9de8ff1f7f1329  $archive" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/openmp-server"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/openmp-server"
+          server_binary="$(find "$RUNNER_TEMP/openmp-server" -type f -name omp-server -print -quit)"
+          test -n "$server_binary"
+          chmod +x "$server_binary"
+          echo "OMP_SERVER_ROOT=$(dirname "$server_binary")" >> "$GITHUB_ENV"
+      - name: Install test gamemode and config
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$OMP_SERVER_ROOT/gamemodes"
+          cp "$RUNNER_TEMP/gamemodetests-package/gamemodes/ac-test.amx" "$OMP_SERVER_ROOT/gamemodes/ac-test.amx"
+          cp "$RUNNER_TEMP/gamemodetests-package/config.json" "$OMP_SERVER_ROOT/config.json"
+      - name: Boot open.mp and verify the test gamemode
+        run: python3 tools/runtime_smoke.py --server-root "$OMP_SERVER_ROOT"
