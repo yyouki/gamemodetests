@@ -1,0 +1,32 @@
+{
+  "name": "Anti-Cheat GameMode Tests (Private)",
+  "language": "English",
+  "announce": false,
+  "enable_query": false,
+  "network": {
+    "port": 7777
+  },
+  "max_players": 16,
+  "game": {
+    "mode": "Anti-Cheat GameMode Tests"
+  },
+  "pawn": {
+    "main_scripts": [
+      "ac-test 1"
+    ],
+    "legacy_plugins": [],
+    "side_scripts": []
+  },
+  "rcon": {
+    "enable": false,
+    "password": ""
+  },
+  "logging": {
+    "enable": true,
+    "file": "gamemodetests.log",
+    "log_chat": false,
+    "log_connection_messages": false,
+    "log_cookies": false,
+    "log_deaths": false
+  }
+}
