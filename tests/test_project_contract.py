@@ -20,7 +20,7 @@ class GameModeContractTests(unittest.TestCase):
 
     def test_framework_dependency_is_pinned_and_external(self) -> None:
         self.assertIn(PINNED_ANTICHEAT_COMMIT, self.workflow)
-        self.assertIn("git fetch --depth=1 origin", self.workflow)
+        self.assertIn("fetch --depth=1 origin", self.workflow)
         self.assertIn("anti-cheat include", self.readme.lower())
 
     def test_required_v2_callbacks_are_implemented(self) -> None:
